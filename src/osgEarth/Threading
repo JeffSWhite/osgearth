@@ -667,11 +667,12 @@ namespace osgEarth { namespace Threading
         //! @return A future result. You can check the result periodically
         //!         to see whether it is available or has been adandoned.
         inline Result schedule();
+        inline Result schedule(const std::string& arena);
 
     private:
         std::function<void()> _delegate;
         Future<RESULT_TYPE> _future;
-        friend class JobScheduler;
+        friend class JobArena;
     };
 
     /**
@@ -679,15 +680,16 @@ namespace osgEarth { namespace Threading
      * You usually don't need to use this class directly.
      * Use Job::schedule() to queue a new job.
      */
-    class OSGEARTH_EXPORT JobScheduler : public osg::Referenced
+    class OSGEARTH_EXPORT JobArena : public osg::Referenced
     {
     public:
-        //! Allocate a new schedule with "numThreads" threads
-        //! is the thread pool.
-        JobScheduler(unsigned numThreads = 2u);
+        //! Allocate a new arena with "concurrency" threads.
+        JobArena(
+            const std::string& name,
+            unsigned concurrency);
 
         //! Destroy
-        ~JobScheduler();
+        ~JobArena();
 
         //! Schedule an asynchronous task.
         //! @param job Job to schedule
@@ -696,14 +698,19 @@ namespace osgEarth { namespace Threading
         template<typename RESULT_TYPE>
         static
         Future<RESULT_TYPE>
-        schedule(Job<RESULT_TYPE>& job) {
-            return singleton()->scheduleJob(job);
+        schedule(Job<RESULT_TYPE>& job, const std::string& name) {
+            return arena(name)->scheduleJob(job);
         }
+
+        //! Sets the concurrency of a named arena
+        static void setSize(
+            const std::string& name,
+            unsigned numThreads);
 
     private:
 
-        //! Access the global singleton job scheduler
-        static JobScheduler* singleton();
+        //! Access the named arena
+        static JobArena* arena(const std::string& name);
 
         void startThreads();
 
@@ -735,11 +742,20 @@ namespace osgEarth { namespace Threading
         bool _done;
         // threads in the pool
         std::vector<std::thread> _threads;
+
+        static Mutex _arenas_mutex;
+        static std::unordered_map<std::string, unsigned> _arenaSizes;
+        static std::unordered_map<std::string, osg::ref_ptr<JobArena>> _arenas;
     };
 
     template<typename RESULT_TYPE>
     Future<RESULT_TYPE> Job<RESULT_TYPE>::schedule() {
-        return JobScheduler::schedule(*this);
+        return JobArena::schedule(*this, "");
+    }
+
+    template<typename RESULT_TYPE>
+    Future<RESULT_TYPE> Job<RESULT_TYPE>::schedule(const std::string& arena) {
+        return JobArena::schedule(*this, arena);
     }
 
 } } // namepsace osgEarth::Threading
